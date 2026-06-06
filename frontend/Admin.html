@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control Elite - Dispatch Center</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        #map { height: 550px; width: 100%; border-radius: 12px; background-color: #0f172a; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 p-6">
+
+    <div class="max-w-7xl mx-auto">
+        <header class="mb-6 flex justify-between items-center border-b border-slate-800 pb-4">
+            <div>
+                <h1 class="text-2xl font-extrabold text-red-500 tracking-tight">🚑 Admin Control Console</h1>
+                <p class="text-slate-400 text-sm">Centralized Emergency Tracking & Routing Intelligence [cite: 32]</p>
+            </div>
+            <a href="index.html" class="text-xs bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 py-2 px-4 rounded-lg transition">Sign Out</a>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div class="bg-slate-900 p-5 rounded-xl border border-slate-800 flex flex-col justify-between">
+                <div class="space-y-4">
+                    <h2 class="text-md font-bold text-slate-200 uppercase tracking-wider">Incident Routing</h2>
+                    
+                    <div>
+                        <label class="block text-xs text-slate-400 mb-1">Incident Destination Address</label>
+                        <input id="destInput" type="text" value="Ikeja, Lagos, Nigeria" placeholder="e.g. Hospital Address" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:outline-none focus:border-red-500">
+                    </div>
+
+                    <button id="routeBtn" class="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-lg cursor-pointer transition">
+                        Broadcast Optimized Route
+                    </button>
+                </div>
+
+                <div class="mt-6">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider">Live System Logs</h3>
+                    <div id="terminal" class="text-xs font-mono text-emerald-400 mt-2 h-64 overflow-y-auto bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-1">
+                        Awaiting connection to server pipeline...
+                    </div>
+                </div>
+            </div>
+            
+            <div class="lg:col-span-3 bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-2xl">
+                <div id="map"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=API_KEY_HERE&callback=initMap" async defer></script>
+
+    <script>
+        let map, ambulanceMarker, directionsRenderer, socket;
+
+        function initMap() {
+            const lagosCore = { lat: 6.5244, lng: 3.3792 };
+            map = new google.maps.Map(document.getElementById("map"), {
+                zoom: 12,
+                center: lagosCore,
+                styles: [{ featureType: "all", elementType: "geometry", stylers: [{ color: "#1e293b" }] }, { featureType: "all", elementType: "labels.text.fill", stylers: [{ color: "#94a3b8" }] }]
+            });
+
+            directionsRenderer = new google.maps.DirectionsRenderer({ 
+                map: map,
+                suppressMarkers: true,
+                polylineOptions: { strokeColor: "#ef4444", strokeWeight: 6 }
+            });
+            
+            ambulanceMarker = new google.maps.Marker({
+                position: lagosCore,
+                map: map,
+                title: "Ambulance Unit 01"
+            });
+
+            connectWebSocket();
+        }
+
+        function connectWebSocket() {
+            socket = new WebSocket("ws://127.0.0.1:8080");
+
+            socket.onopen = () => logTerminal("✅ Dispatch system successfully linked to backend pipeline.");
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'DASHBOARD_UPDATE') {
+                    const pos = { lat: data.lat, lng: data.lng };
+                    ambulanceMarker.setPosition(pos);
+                    map.panTo(pos);
+                    logTerminal(`Incoming Vehicle GPS Ping: Lat ${data.lat.toFixed(4)}, Lng ${data.lng.toFixed(4)}`);
+
+                    if (data.route && data.route.status === "OK") {
+                        directionsRenderer.setDirections(data.route);
+                        logTerminal("🏎️ Traffic Optimized Route updated on Master Map.");
+                    }
+                }
+            };
+
+            socket.onclose = () => {
+                logTerminal("❌ Pipeline offline. Reconnecting...");
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        function logTerminal(text) {
+            const term = document.getElementById("terminal");
+            term.innerHTML += `<div>[${new Date().toLocaleTimeString()}] ${text}</div>`;
+            term.scrollTop = term.scrollHeight;
+        }
+
+        document.getElementById("routeBtn").addEventListener("click", () => {
+            const dest = document.getElementById("destInput").value;
+            logTerminal(`⚡ Command: Requesting traffic bypass route to: ${dest}`);
+            
+            // Fire target update command through WebSockets pipeline
+            socket.send(JSON.stringify({
+                type: 'GPS_UPDATE',
+                vehicleId: 'CONTROL_ELITE_UNIT_01',
+                lat: 6.5244,
+                lng: 3.3792,
+                destination: dest
+            }));
+        });
+    </script>
+</body>
+</html>
