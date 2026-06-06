@@ -1,80 +1,115 @@
-const express = require('express');
-const cors = require('cors');
-const { WebSocketServer } = require('ws');
 const http = require('http');
-const axios = require('axios');
-require('dotenv').config();
+const WebSocket = require('ws');
 
-const app = express();
+// --- MASTER DUAL-USER CREDENTIALS ---
+const ADMIN_EMAIL = "admin@controlelite.com";
+const ADMIN_PASSWORD = "SecretPassword123";
 
-// CRITICAL FIX: This stops the browser from blocking your local file from talking to the backend
-app.use(cors());
-app.use(express.json());
+const DRIVER_EMAIL = "driver@controlelite.com";
+const DRIVER_PASSWORD = "DriverPassword123";
 
-const server = http.createServer(app);
+console.log(`📡 Dual-User Security Engine Active.`);
+console.log(`🔑 Admin Login ID: ${ADMIN_EMAIL}`);
+console.log(`🔑 Driver Login ID: ${DRIVER_EMAIL}`);
 
-// Spin up WebSocket server explicitly tied to Port 8080
-const wss = new WebSocketServer({ server });
+// 1. HTTP SERVER & API ENDPOINT ROUTER
+const server = http.createServer(async (req, res) => {
+  // CORS Security Handshake Headers
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-const PORT = process.env.PORT || 8080;
-const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY;
+  if (req.method === 'OPTIONS') {
+    res.writeHead(200);
+    res.end();
+    return;
+  }
 
-if (!GOOGLE_MAPS_API_KEY) {
-    console.error("❌ STARTUP ERROR: GOOGLE_MAPS_API_KEY is missing from your .env file!");
-} else {
-    console.log("✅ Google Maps API Key successfully detected in server environment.");
-}
+  // --- SIGNUP ENDPOINT (DISABLED FOR HARDCODED MODE) ---
+  if (req.method === 'POST' && req.url === '/api/signup') {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: "Signup is disabled in single-user mode." }));
+    return;
+  }
 
-wss.on('connection', (ws) => {
-    console.log('🔌 SUCCESS: Frontend Dashboard has established a handshake connection!');
+  // --- MULTI-USER LOGIN ENDPOINT ---
+  if (req.method === 'POST' && req.url === '/api/login') {
+    let body = '';
+    req.on('data', chunk => { body += chunk.toString(); });
+    req.on('end', () => {
+      try {
+        const { email, password } = JSON.parse(body);
 
-    ws.on('message', async (message) => {
-        try {
-            console.log("📥 Telemetry Packet Ingested:", message.toString());
-            const data = JSON.parse(message);
-            
-            if (data.type === 'GPS_UPDATE') {
-                let optimizedRoute = null;
-                
-                if (data.destination) {
-                    console.log(`🗺️ Forwarding route request to Google Directions Engine for: ${data.destination}`);
-                    optimizedRoute = await getGoogleTrafficRoute(data.lat, data.lng, data.destination);
-                }
-
-                const responsePayload = JSON.stringify({
-                    type: 'DASHBOARD_UPDATE',
-                    vehicleId: data.vehicleId,
-                    lat: data.lat,
-                    lng: data.lng,
-                    route: optimizedRoute
-                });
-
-                // Broadcast out to all connected browser displays
-                wss.clients.forEach((client) => {
-                    if (client.readyState === 1) {
-                        client.send(responsePayload);
-                    }
-                });
-            }
-        } catch (err) {
-            console.error("❌ Error parsing client packet:", err.message);
+        // Check if Admin
+        if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
+          console.log(`🔒 ACCESS GRANTED: Dispatcher -> ${email}`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, role: 'admin' }));
+        } 
+        // Check if Driver
+        else if (email === DRIVER_EMAIL && password === DRIVER_PASSWORD) {
+          console.log(`🔒 ACCESS GRANTED: Field Driver -> ${email}`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, role: 'driver' }));
+        } 
+        // Rejection Fallback
+        else {
+          console.warn(`⚠️ ACCESS DENIED: Invalid credentials for -> ${email}`);
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: "Identity credentials validation rejected." }));
         }
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: "Internal memory verification error." }));
+      }
     });
+  } 
+  
+  else {
+    res.writeHead(404);
+    res.end();
+  }
 });
 
-async function getGoogleTrafficRoute(originLat, originLng, destination) {
-    try {
-        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${originLat},${originLng}&destination=${encodeURIComponent(destination)}&departure_time=now&traffic_model=best_guess&key=${GOOGLE_MAPS_API_KEY}`;
-        const response = await axios.get(url);
-        
-        console.log(`📡 Google Directions Status API Response: ${response.data.status}`);
-        return response.data; 
-    } catch (error) {
-        console.error("❌ Axio Google API Connection Fault:", error.message);
-        return null;
-    }
-}
+// 2. REAL-TIME WEBSOCKET STREAMING ENGINE
+const wss = new WebSocket.Server({ server });
 
+wss.on('connection', (ws) => {
+  console.log('🔌 SUBSYSTEM LINK ACTIVE: Live tracking WebSocket stream connected.');
+
+  ws.on('message', (message) => {
+    try {
+      const data = JSON.parse(message);
+
+      if (data.type === 'EMERGENCY_BROADCAST') {
+        console.log(`🚨 SIGNAL CAPTURED: Routing payload deployment to -> ${data.destination}`);
+        wss.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({
+              type: 'EMERGENCY_ALERT',
+              destination: data.destination,
+              originLat: data.originLat,
+              originLng: data.originLng
+            }));
+          }
+        });
+      }
+
+      if (data.type === 'GPS_UPDATE') {
+        wss.clients.forEach((client) => {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(JSON.stringify({ type: 'DASHBOARD_UPDATE', lat: data.lat, lng: data.lng }));
+          }
+        });
+      }
+    } catch (err) {
+      console.error('❌ Data pipeline processing failure: ', err.message);
+    }
+  });
+});
+
+// 3. START SERVER
+const PORT = 8080;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Real-time Emergency Node Core Active on http://127.0.0.1:${PORT}`);
+  console.log(`🚀 CONTROL ELITE RUNNING ON PORT: ${PORT}`);
 });
